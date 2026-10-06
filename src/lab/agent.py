@@ -5,6 +5,7 @@ Kiểm tra:    pytest tests/test_02_agent.py
 """
 import os
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
@@ -52,7 +53,7 @@ def make_backend(sandbox: Path):
     """
     python_dir = str(Path(sys.executable).parent)
     env = {
-        "PATH": python_dir + ":/usr/local/bin:/usr/bin:/bin",
+        "PATH": python_dir + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         "HOME": str(sandbox),
         "PYTHONDONTWRITEBYTECODE": "1",
     }
@@ -60,9 +61,11 @@ def make_backend(sandbox: Path):
 
     sandbox_user = os.getenv("LAB_SANDBOX_USER")
     if sandbox_user and hasattr(os, "geteuid") and os.geteuid() == 0:
+        runuser = shutil.which("runuser") or "/usr/sbin/runuser"
+
         class _IsolatedShellBackend(LocalShellBackend):
             def execute(self, command, *, timeout=None):
-                wrapped = f"runuser -u {shlex.quote(sandbox_user)} -p -- sh -c {shlex.quote(command)}"
+                wrapped = f"{runuser} -u {shlex.quote(sandbox_user)} -p -- sh -c {shlex.quote(command)}"
                 return super().execute(wrapped, timeout=timeout)
 
         return _IsolatedShellBackend(**opts)
