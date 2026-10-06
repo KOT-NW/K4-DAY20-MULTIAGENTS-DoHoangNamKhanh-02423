@@ -10,8 +10,8 @@
 
 - Mô hình: `LAB_MODEL=deepseek:deepseek-flash`, nhiệt độ `LAB_TEMPERATURE=0`, `recursion_limit=60`.
 - Deep Agents 0.7.21; chạy trong Docker (image `python:3.12-slim`) trên Windows; shell của tác tử là `/bin/sh`.
-- Ngân sách: 12 lần chạy tác vụ học hợp lệ (chưa tính 6 lần bị loại trước khi vá cô lập) + 9 lần chạy tác vụ đánh giá.
-- Commit của tag `freeze`: `419b375` (commit `hypotheses` trước đó: `1299d9b`).
+- Ngân sách: ~18 lần chạy tác vụ học + 9 lần chạy tác vụ đánh giá (gồm các lần bị loại do lỗi cô lập; xem mục 9).
+- Commit của tag `freeze`: `fc50e94` (commit `hypotheses` trước đó: `1299d9b`).
 
 ## 2. Giả thuyết (commit TRƯỚC tag `freeze`, Phần 4.0)
 
@@ -34,7 +34,6 @@
 | Tác vụ | Check thất bại | Nhóm lỗi (A-G) | Bằng chứng (trích ngắn từ `detail` hoặc vết) |
 |---|---|---|---|
 | code-learn | tests_not_modified | A | "the original files in tests/ must not be modified" (đề ghi rõ "Do not modify the existing files in tests/") |
-| code-learn | rule_type_hints | E | "RULE: every public function ... has type annotations on all parameters and on the return value." |
 | code-learn | rule_regression_tests | E | "RULE: add tests/test_regressions.py with one test function per bug you fixed (at least 3)" |
 | code-learn | rule_changelog | E | "RULE: record each fix in CHANGELOG.md under the heading '## Unreleased' ..." |
 | data-learn | rule_money_in_cents | E | "RULE: money values in answer.json are integer cents (1606.67 USD is written 160667)." |
@@ -44,24 +43,24 @@
 | logs-learn | rule_sorted_errors | E | "RULE: `errors` is sorted by service, then by timestamp_utc, ascending." |
 | logs-learn | rule_schema_header | E | "RULE: the top-level object has "schema_version": 2 and "generated_by": "log-triage"." |
 
-Nhận xét: **nhóm E (quy ước tổ chức) chiếm đa số tuyệt đối: 9/10 check thất bại**; ngoại lệ duy nhất là `tests_not_modified` (nhóm A - vi phạm chỉ dẫn rõ ràng). Bằng chứng phủ định cho các nhóm A–D: các check **kỹ thuật** (không bắt đầu bằng `rule_`) đạt 17/18 trên baseline (code-learn 6/7, data-learn 5/5, logs-learn 6/6) - tức tác tử vẫn xử lý dữ liệu bẩn/định dạng đúng phần lớn; nút thắt là các quy ước không có trong đề. Một skill quy trình tổng quát **có thể** phòng ngừa nhóm E vì `detail` phát biểu quy tắc; nhưng vì mỗi tác vụ có quy ước riêng, skill phải tổng quát hóa.
+Nhận xét: **nhóm E (quy ước tổ chức) chiếm 8/9 check thất bại**; ngoại lệ là `tests_not_modified` (nhóm A - vi phạm chỉ dẫn rõ ràng). Bằng chứng phủ định cho nhóm A–D: check **kỹ thuật** đạt 17/18 (code-learn 6/7, data-learn 5/5, logs-learn 6/6) - tác tử xử lý dữ liệu/log/test đúng phần lớn; nút thắt là quy ước không có trong đề. `rule_type_hints` (từng fail khi shell bị hỏng) nay **đạt**, cho thấy việc chạy được test giúp ích. Skill quy trình tổng quát có thể phòng ngừa nhóm E, nhưng kết quả thực nghiệm cho thấy skill đã không làm được (xem mục 6, 8).
 
 ## 5. Điều kiện `subagents` (Phần 2.3)
 
 - Các subagent đã định nghĩa (tên, vai trò, lý do thiết kế): `explorer` (chỉ đọc và báo cáo sự thật), `implementer` (thực hiện thay đổi, chạy test), `reviewer` (kiểm tra độc lập, không sửa). Ba vai tách biệt để cô lập ngữ cảnh và có bước kiểm chéo.
-- `subagent_calls` ở từng tác vụ: `subagents` = code-learn 1, data-learn 1, logs-learn 1. Lưu ý: `baseline` cũng có 1 ở code-learn/data-learn do subagent `general-purpose` mặc định của Deep Agents (logs-learn baseline = 0).
-- Thông tin khi giao việc: tác tử chính gọi `task` nhưng subagent chạy stateless (chỉ thấy prompt được gửi); `trace.md` chỉ hiện lời gọi `task` và báo cáo cuối, không thấy bước bên trong.
-- Ảnh hưởng token/thời gian: `subagents` mean 371k token so với `baseline` 215k (~1.7×), thời gian dài hơn rõ rệt (code-learn 213s so với 61s).
+- `subagent_calls` ở từng tác vụ: `subagents` learn = code-learn 1, data-learn 0, logs-learn 1; `subagents` eval = code-eval 1, data-eval 3, logs-eval 1. Ở `baseline`, mọi tác vụ = 0 (tác tử chính tự làm).
+- Thông tin khi giao việc: tác tử chính gọi `task` với subagent `reviewer`/`explorer` để kiểm chứng; subagent chạy stateless (chỉ thấy prompt được gửi). `trace.md` chỉ hiện lời gọi `task` và báo cáo cuối.
+- Ảnh hưởng token/thời gian: `subagents` mean 425k token so với `baseline` 153k (~2.8×), thời gian dài hơn rõ rệt (code-learn 223s so với 53s).
 
 ## 6. Self-evolving: skill do curator sinh (Phần 3)
 
-- Số lần chạy curator, số skill bị xóa và lý do: chạy curator **1 lần**, sinh **3 skill**, **không xóa** skill nào (cả ba đều hợp lệ, tổng quát, không lộ đáp án).
+- Số lần chạy curator, số skill bị xóa và lý do: chạy curator **1 lần** (sau khi sửa cô lập), sinh **3 skill**, **không xóa** skill nào (cả ba đều hợp lệ, tổng quát, không lộ đáp án).
 
 | Skill | Tổng quát hay riêng cho tác vụ học? | Đúng hay sai (nêu chỗ sai nếu có) | Độ dài, `description` và `skills_read` ở Phần 3.4 |
 |---|---|---|---|
-| verify-output-contract | Tổng quát: checklist đối chiếu mọi yêu cầu đầu ra (tên tệp, khóa, đơn vị, thứ tự, chuẩn hóa). | Đúng, khớp các `detail` `rule_*` (đơn vị cents, chuẩn hóa, sắp xếp). | 12 dòng; description nêu tình huống "output file/schema/format"; được đọc (`skills_read=3`). |
-| deliver-all-artifacts | Tổng quát: liệt kê đủ mọi deliverable + áp chuẩn code (type hints, test mới, changelog). | Đúng, nhắm đúng nhóm E của code-learn. | 12 dòng; description nêu "multiple deliverables"; được đọc. |
-| recover-from-tool-failure | Tổng quát: đổi công cụ khi lệnh lỗi, không lùng sục filesystem. | Đúng; thậm chí dạy tránh hành vi dò `/lab` gây lỗi quyền. | 10 dòng; description nêu "command/tool fails repeatedly"; được đọc. |
+| output-contract-compliance | Tổng quát: checklist đối chiếu mọi yêu cầu đầu ra (đường dẫn, header, schema, thứ tự trường, đơn vị, metadata). | Đúng, khớp các `detail` `rule_*` (cents, chuẩn hóa, sắp xếp, meta). | 13 dòng; description "Use when a task specifies required output files, schemas..."; được đọc (`skills_read=3`). |
+| protected-files-and-new-artifacts | Tổng quát: không sửa tệp bảo vệ; tạo artifact mới (test hồi quy, changelog) đúng nơi. | Đúng, nhắm đúng nhóm E của code-learn. | 12 dòng; description "Use when a task forbids changing certain files or requires adding new files..."; được đọc. |
+| final-compliance-verification | Tổng quát: biến mọi quy tắc thành checklist pass/fail và tự kiểm trước khi kết thúc. | Đúng; hướng dẫn kiểm chứng, không gây hại. | 13 dòng; description "Use before declaring a task done..."; được đọc. |
 
 ## 7. Kết quả so sánh (Phần 4.3, 4.4)
 
@@ -70,26 +69,26 @@ Nhận xét: **nhóm E (quy ước tổ chức) chiếm đa số tuyệt đối:
 ```text
 | Task | baseline | subagents | skills-auto |
 |---|---|---|---|
-| code-learn | 6/10 | 6/10 | 8/10 |
+| code-learn | 7/10 | 6/10 | 7/10 |
 | data-learn | 5/8 | 5/8 | 5/8 |
 | logs-learn | 6/9 | 6/9 | 6/9 |
-| code-eval | 7/11 | 6/11 | 8/11 |
+| code-eval | 6/11 | 6/11 | 6/11 |
 | data-eval | 5/9 | 5/9 | 5/9 |
 | logs-eval | 6/10 | 6/10 | 6/10 |
-| **Mean score - learning tasks** | 0.63 | 0.63 | 0.70 |
-| **Mean score - evaluation tasks** | 0.60 | 0.57 | 0.63 |
-| **Mean tokens per run** | 190,475 | 355,879 | 210,323 |
+| **Mean score - learning tasks** | 0.66 | 0.63 | 0.66 |
+| **Mean score - evaluation tasks** | 0.57 | 0.57 | 0.57 |
+| **Mean tokens per run** | 153,152 | 425,159 | 239,888 |
 | **Runs that read a skill** | 0/6 | 0/6 | 6/6 |
 ```
 
 ```text
 condition     role    technical  house rules  mean tokens  read a skill
-baseline      eval     17/18         1/12         165,989      0/3
-baseline      learn    17/18         0/9          214,961      0/3
-subagents     eval     17/18         0/12         340,266      0/3
-subagents     learn    17/18         0/9          371,492      0/3
-skills-auto   eval     17/18         2/12         203,112      3/3
-skills-auto   learn    17/18         2/9          217,534      3/3
+baseline      eval     17/18         0/12         130,996      0/3
+baseline      learn    17/18         1/9          175,308      0/3
+subagents     eval     17/18         0/12         426,408      0/3
+subagents     learn    17/18         0/9          423,911      0/3
+skills-auto   eval     17/18         0/12         235,874      3/3
+skills-auto   learn    17/18         1/9          243,902      3/3
 ```
 
 Ghi chú: không lần chạy nào có `error`; `skills_modified=false` ở mọi lần `skills-auto`; `python scripts/verify_freeze.py` báo `OK` (6 runs). Check kỹ thuật đạt 17/18 ở mọi điều kiện/vai trò; khác biệt chỉ nằm ở check quy ước.
@@ -98,12 +97,12 @@ Ghi chú: không lần chạy nào có `error`; `skills_modified=false` ở mọ
 
 > Trả lời từng câu bằng số liệu từ mục 7 và bằng chứng từ vết. Kết quả âm hoặc không có khác biệt vẫn hợp lệ nếu được phân tích tốt.
 
-1. So với `baseline`: trên tác vụ **học**, chỉ `skills-auto` cải thiện (mean 0.70 so với 0.63), `subagents` hòa (0.63). Trên tác vụ **đánh giá**, `skills-auto` cải thiện (0.63 so với 0.60), `subagents` giảm (0.57). Phần cải thiện của `skills-auto` xuất hiện ở cả code-learn (6→8) và code-eval (7→8); data/logs phẳng ở cả hai. Vì vậy **không có** điều kiện cải thiện học mà không cải thiện đánh giá - không có dấu hiệu overfitting mạnh (nhưng mức eval chỉ +1 check, xem câu 6).
-2. Tách kỹ thuật/quy ước (mục 7): check **kỹ thuật** giữ nguyên 17/18 ở mọi điều kiện; khác biệt nằm ở check **quy ước**. Baseline học 0/9 → `skills-auto` 2/9 (`rule_type_hints`, `rule_regression_tests`). Trên eval, baseline 1/12 → `skills-auto` 2/12. Các quy ước **mới** của eval (`rule_version_bump`, `rule_sorted_keys_format`, `rule_source_line`) **không** được skill giúp (vẫn fail) vì skill sinh từ tập học không chứa chúng.
-3. Một check skill **giúp đạt**: `code-learn/rule_regression_tests` (baseline fail → skills-auto pass; chuyển sang `code-eval` cũng pass). Vết `skills-auto` cho thấy đọc đủ 3 skill (`skills_read=3`) và làm theo `deliver-all-artifacts` (tạo `tests/test_regressions.py`). Một check skill **không giúp**: `data-learn/rule_money_in_cents` vẫn fail dù đã đọc `verify-output-contract` - skill được đọc nhưng **không làm theo** (không đổi sang integer cents).
-4. Chi phí: mean token baseline 190k, `subagents` 356k (~1.9×), `skills-auto` 210k. Hiệu quả điểm/token tốt nhất thuộc `skills-auto` (0.70 học / 0.63 eval với 210k). Đa tác tử **không đáng** chi phí trong thí nghiệm này: điểm eval thấp hơn baseline (0.57 so với 0.60) mà token gần gấp đôi.
-5. Rò rỉ/quá khớp: **không rò rỉ** - curator chỉ đọc run `role=="learn"`, `validate_skill` từ chối skill chứa `eval_markers()`, và 3 skill không nêu id tác vụ/tên tệp riêng/đáp án. Quá khớp: **một phần** - skill giúp học (+2 check code) và chỉ chuyển một phần sang eval (+1 check code); quy ước mới của eval không được giúp.
-6. Nhiễu: cùng bộ skill, tác vụ học ở Phần 3.4 (bản sao `results/skills-auto-dev`) là code 7/10, data 5/8, logs 6/9; sau đóng băng là code 8/10, data 5/8, logs 6/9. Chênh lệch duy nhất là code-learn **+1** (≈0.03 mean) với CÙNG skill → nhiễu. Do đó chênh lệch ±1 check trong bảng mục 7 không đáng tin; chỉ chênh lệch ≥2 check (code-learn 6→8) mới có ý nghĩa.
+1. So với `baseline`: **không điều kiện nào cải thiện**. Trên tác vụ **học**, `skills-auto` bằng baseline (mean 0.66), `subagents` thấp hơn (0.63; code-learn 6 so với 7). Trên tác vụ **đánh giá**, cả ba điều kiện bằng nhau (0.57). Không có điều kiện nào cải thiện học mà không cải thiện đánh giá, nên **không có dấu hiệu overfitting** - nhưng cũng không có lợi ích nào để quá khớp.
+2. Tách kỹ thuật/quy ước (mục 7): check **kỹ thuật** = 17/18 ở mọi điều kiện/vai trò. House rules: baseline học 1/9, `skills-auto` học 1/9 → **skill không giúp thêm quy ước nào**. Trên eval, mọi điều kiện 0/12; các quy ước **mới** của eval (`rule_version_bump`, `rule_sorted_keys_format`, `rule_source_line`) không được skill giúp.
+3. Skill **được đọc nhưng không hiệu quả**: `skills_read=3` ở mọi run `skills-auto`, nhưng `data-learn/rule_money_in_cents` vẫn fail dù `output-contract-compliance` ghi rõ "apply unit ... exactly at output time" - skill được đọc nhưng tác tử **không làm theo**. Không có check nào `skills-auto` vượt baseline (bằng chứng âm rõ ràng).
+4. Chi phí: mean token baseline 153k, `subagents` 425k (~2.8×), `skills-auto` 240k. Hiệu quả điểm/token tốt nhất là `baseline`. Đa tác tử **không đáng** chi phí: cùng điểm eval (0.57) mà token gần gấp ba.
+5. Rò rỉ/quá khớp: **không rò rỉ** - curator chỉ đọc run `role=="learn"`, `validate_skill` từ chối skill chứa `eval_markers()`, 3 skill không nêu id tác vụ/tên tệp riêng/đáp án. **Không quan sát được quá khớp** vì skill vốn không cải thiện gì.
+6. Nhiễu: cùng bộ skill, tác vụ học ở Phần 3.4 (bản `results/skills-auto-dev`) là code 8/10, data 5/8, logs 6/9; sau đóng băng là code 7/10, data 5/8, logs 6/9. Chênh lệch code-learn **-1** (≈0.03 mean) với CÙNG skill → nhiễu. Vậy mọi chênh lệch ±1 check trong bảng mục 7 là nhiễu; kết luận hợp lệ là **các điều kiện tương đương trong sai số**.
 
 ## 9. Hạn chế và tính hợp lệ
 
@@ -113,13 +112,13 @@ Ghi chú: không lần chạy nào có `error`; `skills_modified=false` ở mọ
 2. **Mỗi cấu hình chạy một lần** (trừ learn của skills-auto có bản Phần 3.4): không đo được phương sai; ước lượng nhiễu chỉ từ một cặp lặp lại, nên độ tin cậy của bảng bị giới hạn.
 3. **Chỉ một mô hình** (`deepseek-flash`, nhiệt độ 0): kết quả không tổng quát cho mô hình khác; mô hình mạnh có thể đã ghi nhớ quy ước.
 4. **Quy ước do giảng viên thiết kế sẵn:** "house rules" có thể đoán/memorize, làm điểm phụ thuộc vào việc mô hình có đọc được tài liệu ẩn hay không.
-5. **Tính hợp lệ phụ thuộc cô lập:** bản chạy đầu tiên bị vô hiệu vì shell của tác tử đọc được `tasks/*/check.py` (điểm 9/9 giả). Sau khi vá (chạy shell bằng `nobody`, chmod `ROOT` 700), baseline giảm còn đúng mức có lỗi. Nếu không phát hiện và vá, toàn bộ kết luận sẽ sai.
+5. **Tính hợp lệ phụ thuộc cô lập (hai lỗi harness đã gặp):** (a) bản đầu shell đọc được `tasks/*/check.py` (điểm 9/9 giả) → vá bằng chạy shell user `nobody` + chmod `ROOT` 700; (b) bản vá đầu thiếu `/usr/sbin` trong `PATH` nên mọi lệnh shell chết (`runuser: not found`), làm hỏng 21 lần chạy → sửa (dùng đường dẫn tuyệt đối của `runuser`) rồi chạy lại toàn bộ. Nếu không phát hiện và vá cả hai, kết luận sẽ sai.
 
 ## 10. Kết luận
 
 > Tối đa 5 câu. Chỉ khẳng định điều số liệu hỗ trợ. Nêu một đề xuất cải tiến tiếp theo.
 
-Đa tác tử **không giúp**: `subagents` hòa baseline trên tác vụ học và thấp hơn trên eval (0.57 so với 0.60) nhưng tốn token gần gấp đôi. Self-evolving có hiệu quả **hạn chế nhưng thật**: `skills-auto` nâng điểm học (0.63→0.70) và eval (0.60→0.63), sửa được 2 quy ước code và chuyển 1 sang eval, nhưng không giúp data/logs hay quy ước mới của eval. Kết quả phù hợp H1 và H3, và phần lớn H2. Đề xuất: lặp mỗi cấu hình ≥3 lần để tách nhiễu, cho subagent dùng skill (hướng 6d), red-team curator (6c) và dùng sandbox cô lập thật.
+Với harness đã sửa, **không điều kiện nào vượt baseline**: `skills-auto` bằng baseline (0.66 học / 0.57 eval), `subagents` thấp hơn trên học (0.63) với token gần gấp ba. Đa tác tử **không đáng chi phí** trong thí nghiệm này. Self-evolving **không cải thiện**: curator sinh 3 skill hợp lệ và tác tử đọc cả 3 (`skills_read=3`) nhưng không sửa thêm được check quy ước nào - skill được đọc mà không được làm theo. Kết quả **không ủng hộ H1/H2** (kỳ vọng cải thiện) nhưng **ủng hộ H3** (eval ≤ học) và khớp cảnh báo của SkillsBench/SkillEvolBench rằng skill do mô hình tự sinh trung bình không có lợi. Đề xuất: lặp ≥3 lần để tách nhiễu, cho subagent dùng skill (6d), và red-team curator (6c).
 
 ## Phụ lục
 
@@ -135,4 +134,4 @@ Ghi chú: không lần chạy nào có `error`; `skills_modified=false` ở mọ
   9. `python -m lab.runner --condition skills-auto --tasks all`
   10. `python -m lab.compare > report/table.md`; `python scripts/verify_freeze.py`; `python scripts/check_breakdown.py`
 - Thử thách mở rộng (nếu có): chưa chọn; phát hiện bảo mật dưới đây là chất liệu trực tiếp cho hướng 6c (red team).
-- Ghi chú khác: **Lỗ hổng cô lập.** `LocalShellBackend` không giam shell (`virtual_mode` vô hiệu với shell); agent đã `ls -R /lab`, `cat tasks/*/check.py` và đạt điểm giả 9/9. Đã vá trong `make_backend`/`run_task`: shell chạy bằng user `nobody` (`runuser -u nobody -p`) và `chmod 700` thư mục gốc repo trong lúc chạy, sandbox `chmod 777`. Sau vá, baseline trở về mức có lỗi đúng như thiết kế.
+- Ghi chú khác: **Hai lỗi cô lập đã gặp.** (a) `LocalShellBackend` không giam shell (`virtual_mode` vô hiệu với shell): agent `ls -R /lab`, `cat tasks/*/check.py` → điểm giả 9/9. Vá bằng cách chạy shell user `nobody` (`runuser -u nobody -p`) + `chmod 700` repo trong lúc chạy, sandbox `chmod 777`. (b) Bản vá đầu thiếu `/usr/sbin` trong `PATH` nên `runuser: not found` → shell chết ở cả 21 lần chạy; sửa bằng đường dẫn tuyệt đối `runuser` rồi chạy lại toàn bộ. Tag `freeze` cuối cùng = `fc50e94`.
