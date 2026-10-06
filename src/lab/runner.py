@@ -6,10 +6,17 @@ Chạy thật:   python -m lab.runner --condition baseline --tasks learn
 """
 import argparse
 import json
+import os
+import shutil
+import stat
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, ToolMessage
 
+from .agent import build_agent
 from .grading import grade                                                      # có sẵn
 from .tasks import ROOT, get_task, hash_dir, list_tasks, prepare_sandbox         # có sẵn
 
@@ -46,6 +53,32 @@ def render_trace(messages) -> str:
     return "\n\n".join(parts)
 
 
+def _chmod_tree(path: Path, mode: int) -> None:
+    """Đổi quyền cho cả cây thư mục (dùng để mở sandbox cho user không đặc quyền)."""
+    for p in [path, *path.rglob("*")]:
+        try:
+            os.chmod(p, mode)
+        except OSError:
+            pass
+
+
+def _count_skills_read(messages) -> int:
+    """Số skill KHÁC NHAU mà tác tử đã đọc (qua các tool call `read_file` trỏ vào skills/)."""
+    names = set()
+    for m in messages:
+        if not isinstance(m, AIMessage):
+            continue
+        for tc in m.tool_calls:
+            if tc["name"] != "read_file":
+                continue
+            path = str(tc["args"].get("file_path", ""))
+            if "skills/" in path:
+                name = path.split("skills/", 1)[1].split("/", 1)[0]
+                if name:
+                    names.add(name)
+    return len(names)
+
+
 def run_task(task_id: str, condition: str, results_dir="results", model=None, recursion_limit: int = 60) -> dict:
     """Chạy MỘT tác vụ dưới MỘT điều kiện, chấm điểm, ghi kết quả, và trả về bản ghi (record).
 
@@ -65,7 +98,89 @@ def run_task(task_id: str, condition: str, results_dir="results", model=None, re
     Lỗi khi chạy tác tử KHÔNG được làm chương trình dừng: ghi vào `error` và vẫn chấm điểm.
     Sandbox là thư mục tạm NGOÀI kho mã nguồn và phải được xóa sau khi chạy.
     """
-    raise NotImplementedError("TODO 1: cài đặt run_task (xem guides/pseudocode/03_runner.md)")
+    cfg = CONDITIONS[condition]
+    task = get_task(task_id)
+    skills_dir = ROOT / cfg["skills_dir"] if cfg["skills_dir"] else None
+
+    out = Path(results_dir) / condition / task_id
+    out.mkdir(parents=True, exist_ok=True)
+
+    record = {
+        "task": task_id,
+        "condition": condition,
+        "role": task.role,
+        "error": None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    sandbox = Path(tempfile.mkdtemp(prefix=f"lab-{task_id}-"))
+    isolate = hasattr(os, "geteuid") and os.geteuid() == 0
+    repo_mode = None
+    old_umask = None
+    try:
+        prepare_sandbox(task, sandbox, skills_dir)
+        before_skills = hash_dir(sandbox / "skills")
+        record["skills_sha256"] = before_skills
+
+        if isolate:
+            os.environ["LAB_SANDBOX_USER"] = "nobody"
+            old_umask = os.umask(0)
+            _chmod_tree(sandbox, 0o777)
+            repo_mode = stat.S_IMODE(os.stat(ROOT).st_mode)
+            os.chmod(ROOT, 0o700)
+
+        try:
+            agent = build_agent(sandbox, mode=cfg["mode"], use_skills=skills_dir is not None, model=model)
+            usage = UsageMetadataCallbackHandler()
+            t0 = datetime.now()
+
+            try:
+                result = agent.invoke(
+                    {"messages": [{"role": "user", "content": task.instruction}]},
+                    config={"callbacks": [usage], "recursion_limit": recursion_limit},
+                )
+                messages = result["messages"]
+                final = messages[-1].content if messages else ""
+            except Exception as exc:  # noqa: BLE001 - lỗi tác tử không được làm dừng chương trình
+                record["error"] = f"{type(exc).__name__}: {exc}"
+                messages = []
+                final = ""
+        finally:
+            if isolate:
+                if repo_mode is not None:
+                    os.chmod(ROOT, repo_mode)
+                os.environ.pop("LAB_SANDBOX_USER", None)
+                if old_umask is not None:
+                    os.umask(old_umask)
+
+        record["seconds"] = round((datetime.now() - t0).total_seconds(), 1)
+
+        input_tokens = output_tokens = 0
+        for meta in (usage.usage_metadata or {}).values():
+            input_tokens += meta.get("input_tokens", 0)
+            output_tokens += meta.get("output_tokens", 0)
+        record["tokens"] = {"input": input_tokens, "output": output_tokens,
+                            "total": input_tokens + output_tokens}
+
+        calls = [tc for m in messages if isinstance(m, AIMessage) for tc in m.tool_calls]
+        record["tool_calls"] = len(calls)
+        record["subagent_calls"] = sum(1 for tc in calls if tc["name"] == "task")
+        record["skills_read"] = _count_skills_read(messages)
+        record["skills_modified"] = hash_dir(sandbox / "skills") != before_skills
+        record["final_message"] = final
+
+        g = grade(task, sandbox / "workspace")
+        record["score"] = g["score"]
+        record["passed"] = g["passed"]
+        record["total"] = g["total"]
+        record["checks"] = g["checks"]
+
+        (out / "trace.md").write_text(render_trace(messages), encoding="utf-8")
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+    (out / "run.json").write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    return record
 
 
 def main(argv=None):

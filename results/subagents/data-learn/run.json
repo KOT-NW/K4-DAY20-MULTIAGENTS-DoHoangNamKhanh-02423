@@ -1,0 +1,64 @@
+{
+  "task": "data-learn",
+  "condition": "subagents",
+  "role": "learn",
+  "error": null,
+  "timestamp": "2026-10-06T03:35:52.165030+00:00",
+  "skills_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "seconds": 213.8,
+  "tokens": {
+    "input": 445951,
+    "output": 61379,
+    "total": 507330
+  },
+  "tool_calls": 30,
+  "subagent_calls": 1,
+  "skills_read": 0,
+  "skills_modified": false,
+  "final_message": "Wrote `workspace/answer.json`. Note: the sandbox shell is broken (every command fails with `runuser: not found`), so I computed by hand from the file and had a reviewer subagent independently recompute everything — both agreed exactly. I also searched the whole sandbox for the referenced \"Acme reporting conventions\" document but found none (only `workspace/README.md` and `workspace/sales.csv` exist), so I used exactly the five requested keys and followed the README's cleaning rules.\n\nHow I cleaned the data:\n\n1. **Duplicate rows** — The README says the same order may be re-exported, so I kept one row per `order_id`. The file has 101 data rows and 94 distinct orders; 7 rows were exact duplicates (`S-1009, S-1021, S-1022, S-1024, S-1053, S-1072, S-1087`, each appearing twice, byte-identical). → `duplicate_rows_removed = 7`.\n2. **Missing amounts** — `-999` is \"unknown\"; treated as missing and never summed. 8 distinct orders had `-999`. → `missing_amount_orders = 8`.\n3. **Region normalisation** — Stripped stray whitespace and matched case-insensitively (`\" North\"`, `\"NORTH\"`, `\"north\"` → North, etc.).\n4. **Date normalisation to UTC** — Parsed all three formats (`YYYY-MM-DD`, `DD/MM/YYYY` as day-first, and ISO-8601 with offset; offset-less values are 00:00 UTC) and converted to UTC before the Q1 test. This flipped four North orders across the boundary: `S-2002` (local 2024-01-01, UTC 2023-12-31) and `S-2000` (local 2024-03-31, UTC 2024-04-01) were **excluded**, while `S-2001` (UTC 2024-03-31) and `S-2003` (UTC 2024-01-01) were **included**.\n5. **Q1 North revenue** — 10 distinct North orders fall in 2024-01-01 00:00:00 – 2024-03-31 23:59:59 UTC, summing to `3130.24`; the Q1-dated but missing-amount North orders (`S-1020`, `S-1033`) were excluded.\n6. **Top region** (deduped, missing excluded): North 9504.47 > South 9136.24 > East 8790.82 > West 8475.68 → `North`. Dedup matters here: counting raw duplicate rows would have made East look highest.\n\nFinal values: `north_q1_revenue`=3130.24, `north_q1_orders`=10, `top_region`=\"North\", `missing_amount_orders`=8, `duplicate_rows_removed`=7.\n\nFiles created: `workspace/answer.json`.",
+  "score": 0.625,
+  "passed": 5,
+  "total": 8,
+  "checks": [
+    {
+      "name": "north_q1_revenue",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "north_q1_orders",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "top_region",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "missing_amount_orders",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "duplicate_rows_removed",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "rule_money_in_cents",
+      "passed": false,
+      "detail": "RULE: money values in answer.json are integer cents (1606.67 USD is written 160667)."
+    },
+    {
+      "name": "rule_meta_block",
+      "passed": false,
+      "detail": "RULE: answer.json has an object `meta` = {\"source\": <input file name>, \"rows_in\": <number of data rows in the input file, duplicates included>, \"rows_used\": <number of distinct orders with a known amount>}."
+    },
+    {
+      "name": "rule_clean_csv",
+      "passed": false,
+      "detail": "RULE: write workspace/clean.csv with the header order_id,timestamp_utc,region,amount_cents; one row per distinct order with a known amount; timestamp_utc as YYYY-MM-DDTHH:MM:SSZ (UTC); region in canonical spelling (North, South, East, West); amount in integer cents."
+    }
+  ]
+}
